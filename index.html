@@ -1,0 +1,443 @@
+<style>
+    html,
+    body {
+        width: 100%;
+        height: 100%;
+    }
+
+    #map {
+        width: 75%;
+        height: 75%;
+    }
+
+    #panel {
+        width: 200px;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+        float: right;
+        margin: 10px;
+    }
+
+    #color-palette {
+        margin: 12px;
+        clear: both;
+    }
+
+    .color-button {
+        width: 18px;
+        height: 18px;
+        font-size: 0;
+        margin: 2px;
+        float: left;
+        cursor: pointer;
+    }
+
+    .controller-button {
+        background-color: #fff;
+        float: left;
+        cursor: pointer;
+        border-radius: 3px;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+        margin: 8px 10px 10px 12px;
+        text-align: center;
+    }
+
+    .controller-button-text {
+        font-family: Roboto, Arial, sans-serif;
+        color: black;
+        font-size: 16px;
+        padding-left: 5px;
+        padding-right: 5px;
+        line-height: 38px;
+    }
+
+
+    #delete-button,
+    #Load-button,
+    #Save-button {
+        margin-top: 5px;
+    }
+</style>
+
+<div id="map"></div>
+
+<!--key=XXX-->
+<script
+    src="https://maps.googleapis.com/maps/api/js?signed_in=false&key=AIzaSyAzvUT_aSr4qGd4kenpLYDKI2aD1_zPmSM&libraries=drawing&callback=initMap"
+    async defer></script>
+
+
+<script>
+    const Taipei = {
+        lat: 25,
+        lng: 121.58820
+    };
+
+    var map;
+    var shapes = [];
+    var colors = ['#1E90FF', '#FF1493', '#32CD32', '#FF8C00', '#4B0082'];
+    var colorButtons = {};
+    var drawingManager;
+    var selectedShape;
+    var selectedColor;
+
+    /*初始化*/
+    function initMap() {
+
+        //地圖座標
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: Taipei,
+            /*初始位置*/
+            zoom: 15,
+            /*數值越大，縮放越近*/
+            disableDefaultUI: true,
+            zoomControl: true
+        });
+
+        var polyOptions = {
+            strokeWeight: 0,
+            fillOpacity: 0.45,
+            editable: true,
+            draggable: true
+        };
+
+        //繪圖工具建立
+        drawingManager = new google.maps.drawing.DrawingManager({
+            drawingMode: google.maps.drawing.OverlayType.POLYLINE, //預設模式
+            drawingControl: true,
+            drawingControlOptions: {
+                position: google.maps.ControlPosition.TOP_LEFT,
+                drawingModes: [
+                    //google.maps.drawing.OverlayType.CIRCLE, //圓形
+                    //google.maps.drawing.OverlayType.POLYGON, //三角
+                    google.maps.drawing.OverlayType.POLYLINE, //線
+                    //google.maps.drawing.OverlayType.RECTANGLE, //方形
+                ],
+            },
+            markerOptions: {
+                draggable: true
+            },
+            polylineOptions: {
+                editable: true,
+                draggable: true
+            },
+            rectangleOptions: polyOptions,
+            circleOptions: polyOptions,
+            polygonOptions: polyOptions,
+            map: map
+        });
+
+        //畫圖完成
+        google.maps.event.addListener(drawingManager, 'overlaycomplete', function (e) {
+            var newShape = e.overlay;
+            newShape.type = e.type;
+
+            if (shapes.findIndex(x => x == newShape) === -1) {
+                shapes.push(newShape);
+            }
+
+            if (e.type !== google.maps.drawing.OverlayType.MARKER) {
+                // Switch back to non-drawing mode after drawing a shape.
+                drawingManager.setDrawingMode(null);
+
+                // Add an event listener that selects the newly-drawn shape when the user
+                // mouses down on it.
+                google.maps.event.addListener(newShape, 'click', function (e) {
+                    if (e.vertex !== undefined) {
+                        if (newShape.type === google.maps.drawing.OverlayType.POLYGON) {
+                            var path = newShape.getPaths().getAt(e.path);
+                            path.removeAt(e.vertex);
+                            if (path.length < 3) {
+                                newShape.setMap(null);
+                            }
+                        }
+                        if (newShape.type === google.maps.drawing.OverlayType.POLYLINE) {
+                            var path = newShape.getPath();
+                            path.removeAt(e.vertex);
+                            if (path.length < 2) {
+                                newShape.setMap(null);
+                            }
+                        }
+                    }
+                    setSelection(newShape);
+                });
+                setSelection(newShape);
+            } else {
+                google.maps.event.addListener(newShape, 'click', function (e) {
+                    setSelection(newShape);
+                });
+                setSelection(newShape);
+            }
+        });
+
+        google.maps.event.addListener(drawingManager, 'drawingmode_changed', clearSelection);
+        google.maps.event.addListener(map, 'click', clearSelection);
+
+        //建立功能按鈕
+        const rightControlDiv = document.createElement("div");
+        CenterControl(rightControlDiv, map);
+        DeleteControl(rightControlDiv, map);
+        SaveControl(rightControlDiv, map);
+        LoadControl(rightControlDiv, map);
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(rightControlDiv);
+
+        //建立顏色按鈕
+        const centerControlDiv = document.createElement("div");
+        buildColorPalette(centerControlDiv);
+        map.controls[google.maps.ControlPosition.TOP_CENTER].push(centerControlDiv);
+
+    }
+
+    /*返回按鈕*/
+    function CenterControl(controlDiv, map) {
+        // Set CSS for the control border.
+        const controlUI = document.createElement("div");
+        controlUI.className = 'controller-button';
+
+        controlUI.title = "Click to recenter the map";
+        controlDiv.appendChild(controlUI);
+
+        // Set CSS for the control interior.
+        const controlText = document.createElement("div");
+        controlText.className = 'controller-button-text';
+
+        controlText.innerHTML = "Center Map";
+        controlUI.appendChild(controlText);
+
+        controlUI.addEventListener("click", () => {
+            map.setCenter(Taipei);
+        });
+    }
+
+    /*刪除按鈕*/
+    function DeleteControl(controlDiv, map) {
+        // Set CSS for the control border.
+        const controlUI = document.createElement("div");
+        controlUI.className = 'controller-button';
+
+        controlUI.title = "Delete Select Shape";
+        controlDiv.appendChild(controlUI);
+
+        // Set CSS for the control interior.
+        const controlText = document.createElement("div");
+        controlText.className = 'controller-button-text';
+
+        controlText.innerHTML = "Delete";
+        controlUI.appendChild(controlText);
+
+        // Setup the click event listeners: simply set the map to Chicago.
+        controlUI.addEventListener("click", deleteSelectedShape);
+    }
+
+    /*儲存按鈕*/
+    function SaveControl(controlDiv, map) {
+        // Set CSS for the control border.
+        const controlUI = document.createElement("div");
+        controlUI.className = 'controller-button';
+
+        controlUI.title = "Save Shape";
+        controlDiv.appendChild(controlUI);
+
+        // Set CSS for the control interior.
+        const controlText = document.createElement("div");
+        controlText.className = 'controller-button-text';
+
+        controlText.innerHTML = "Save";
+        controlUI.appendChild(controlText);
+
+        // Setup the click event listeners: simply set the map to Chicago.
+        controlUI.addEventListener("click", SaveShape);
+    }
+
+    /*載入按鈕*/
+    function LoadControl(controlDiv, map) {
+        // Set CSS for the control border.
+        const controlUI = document.createElement("div");
+        controlUI.className = 'controller-button';
+
+        controlUI.title = "Load Shape";
+        controlDiv.appendChild(controlUI);
+
+        // Set CSS for the control interior.
+        const controlText = document.createElement("div");
+        controlText.className = 'controller-button-text';
+
+        controlText.innerHTML = "Load";
+        controlUI.appendChild(controlText);
+
+        // Setup the click event listeners: simply set the map to Chicago.
+        controlUI.addEventListener("click", LoadShape);
+    }
+
+    /*建立色盤按鈕*/
+    function buildColorPalette(controlDiv) {
+        var colorPalette = document.createElement('div');
+        for (var i = 0; i < colors.length; ++i) {
+            var currColor = colors[i];
+            var colorButton = makeColorButton(currColor);
+            colorPalette.appendChild(colorButton);
+            colorButtons[currColor] = colorButton;
+        }
+        selectColor(colors[0]);
+        controlDiv.appendChild(colorPalette);
+    }
+
+    /*建立產顏色按鈕及事件*/
+    function makeColorButton(color) {
+        var button = document.createElement('span');
+        button.className = 'color-button';
+        button.style.backgroundColor = color;
+        google.maps.event.addDomListener(button, 'click', function () {
+            selectColor(color);
+            setSelectedShapeColor(color);
+        });
+
+        return button;
+    }
+
+    function selectColor(color) {
+        selectedColor = color;
+        for (var i = 0; i < colors.length; ++i) {
+            var currColor = colors[i];
+            colorButtons[currColor].style.border = currColor == color ? '2px solid #789' : '2px solid #fff';
+        }
+
+        //線
+        var polylineOptions = drawingManager.get('polylineOptions');
+        polylineOptions.strokeColor = color;
+        drawingManager.set('polylineOptions', polylineOptions);
+
+        //方形
+        var rectangleOptions = drawingManager.get('rectangleOptions');
+        rectangleOptions.fillColor = color;
+        drawingManager.set('rectangleOptions', rectangleOptions);
+
+        //圓形
+        var circleOptions = drawingManager.get('circleOptions');
+        circleOptions.fillColor = color;
+        drawingManager.set('circleOptions', circleOptions);
+
+        //多邊形
+        var polygonOptions = drawingManager.get('polygonOptions');
+        polygonOptions.fillColor = color;
+        drawingManager.set('polygonOptions', polygonOptions);
+    }
+
+    function setSelectedShapeColor(color) {
+        if (selectedShape) {
+            if (selectedShape.type == google.maps.drawing.OverlayType.POLYLINE) {
+                selectedShape.set('strokeColor', color);
+            } else {
+                selectedShape.set('fillColor', color);
+            }
+        }
+    }
+
+    function clearSelection() {
+        if (selectedShape) {
+            if (selectedShape.type !== 'marker') {
+                selectedShape.setEditable(false);
+            }
+            selectedShape = null;
+        }
+    }
+
+    //選取的圖片
+    function setSelection(shape) {
+        if (shape.type !== 'marker') {
+            clearSelection();
+            shape.setEditable(true);
+            selectColor(shape.get('fillColor') || shape.get('strokeColor'));
+        }
+        selectedShape = shape;
+    }
+
+    function deleteSelectedShape() {
+        if (selectedShape) {
+            selectedShape.setMap(null);
+
+            if (shapes.findIndex(x => x == selectedShape) != -1) {
+                shapes.splice(shapes.findIndex(x => x == selectedShape), 1);
+            }
+        }
+    }
+
+    function SaveShape() {
+        var data = shapes.map(function (shape) {
+            var rshape = {};
+            rshape.type = shape.type;
+            rshape.strokeColor = shape.strokeColor;
+
+            //only save polyline
+            if (rshape.type === 'polyline') {
+
+                rshape.path = shape.getPath().sd.map(function (sd) {
+                    return {
+                        lat: sd.lat(),
+                        lng: sd.lng()
+                    }
+                })
+            }
+            return rshape;
+        });
+
+        alert('save shapes: ' + shapes.length);
+    }
+
+    function LoadShape() {
+
+        //test data
+
+        var data = [{
+            "type": "polyline",
+            "strokeColor": "#1E90FF",
+            "path": [{
+                    "lat": 25.002552425948494,
+                    "lng": 121.58361222959577
+                },
+                {
+                    "lat": 24.99854630926296,
+                    "lng": 121.57833364225446
+                },
+                {
+                    "lat": 24.998079568726773,
+                    "lng": 121.58949163175642
+                },
+                {
+                    "lat": 25.002552425948494,
+                    "lng": 121.58361222959577
+                }
+            ]
+        }];
+
+        deleteAllShape();
+        draw_polyline(data[0]);
+
+    }
+
+    function draw_polyline(data) {
+        
+        var line = new google.maps.Polyline({
+            strokeColor:data.strokeColor,
+            path: data.path,
+            editable:true,
+            draggable:true,
+            type:"polyline"
+        });
+
+        line.setMap(map);
+        google.maps.event.addListener(line, 'click', function() {setSelection(line)});
+
+        shapes.push(line);
+    }
+
+    function deleteAllShape() {
+        for (var i=0; i < shapes.length; i++)
+        {
+            shapes[i].setMap(null);
+        }
+        shapes = [];
+    }
+
+</script>
